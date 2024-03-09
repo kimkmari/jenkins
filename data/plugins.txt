@@ -1,0 +1,11 @@
+git:4.11.5
+matrix-auth:3.1.5
+workflow-aggregator:590.v6a_d052e5a_a_b_5
+maven-plugin:3.19
+github:1.35.0
+configuration-as-code:1559.v38a_b_2e3b_6b_b_7
+saml:4.354.vdc8c005cda_34
+config-file-provider:3.11.1
+pipeline-maven:1205.vceea_7b_972817
+nodejs:1.5.1
+mattermost:3.1.1

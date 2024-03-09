@@ -1,0 +1,156 @@
+#! /usr/bin/bash
+
+NEW_ADMIN_USER="kimkm@kimkm.com^:Google1"
+PROJECT_CODE=kkm
+
+# =============================================================================
+JENKINS_URL=kimkm.com
+
+# =============================================================================
+USER_NAME=ubuntu
+
+mkdir -p /data/install/jenkins/data/init.groovy.d
+mkdir -p /data/jenkins_home
+
+chown -R ${USER_NAME}:${USER_NAME} /data
+chown 1000 /data/jenkins_home
+apt-get update -y
+
+apt install git -y
+
+echo "1. [base util installation] start"
+timedatectl set-timezone Asia/Seoul
+
+apt install openjdk-11-jdk -y
+
+apt list docker docker-compose
+
+echo "1. [base util installation] end"
+echo "2. [docker program installation] start"
+su - ${USER_NAME} -c "cd /data/install/jenkins;curl -fsSL https://get.docker.com -o get-docker.sh;sh get-docker.sh;sudo usermod -aG docker ${USER_NAME}"
+
+systemctl enable docker
+systemctl start docker
+
+apt install docker-compose -y
+
+systemctl restart docker
+echo "2. [docker program installation] end"
+echo "3. [jenkins config setting] start"
+nl=$'\n'
+YAML_USER="- id: admin${nl}          password: Sandbox2022${nl}"
+YAML_PERMISSION="- \"USER:Overall/Administer:admin\"${nl}"
+for users in $NEW_ADMIN_USER
+do
+  user=(${users//^:/ })
+  NEW_ADMIN_USERNAME=${user[0]}
+  NEW_ADMIN_PASSWORD=${user[1]}
+  YAML_USER=${YAML_USER}"        - id: ${NEW_ADMIN_USERNAME}${nl}          password: ${NEW_ADMIN_PASSWORD}${nl}"
+  YAML_PERMISSION=${YAML_PERMISSION}"      - \"USER:Overall/Administer:${NEW_ADMIN_USERNAME}\"${nl}"
+done
+
+su - ${USER_NAME} -c "cat > /data/install/jenkins/jenkins.yaml <<EOF
+jenkins:
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        ${YAML_USER}
+  authorizationStrategy:
+    globalMatrix:
+      permissions:
+      - \"GROUP:Credentials/View:${PROJECT_CODE}-user\"
+      - \"GROUP:Job/Build:${PROJECT_CODE}-user\"
+      - \"GROUP:Job/Cancel:${PROJECT_CODE}-user\"
+      - \"GROUP:Job/Configure:${PROJECT_CODE}-user\"
+      - \"GROUP:Job/Create:${PROJECT_CODE}-user\"
+      - \"GROUP:Job/Delete:${PROJECT_CODE}-user\"
+      - \"GROUP:Job/Discover:${PROJECT_CODE}-user\"
+      - \"GROUP:Job/Move:${PROJECT_CODE}-user\"
+      - \"GROUP:Job/Read:${PROJECT_CODE}-user\"
+      - \"GROUP:Job/Workspace:${PROJECT_CODE}-user\"
+      - \"GROUP:Overall/Administer:${PROJECT_CODE}-admin\"
+      - \"GROUP:Overall/Read:authenticated\"
+      - \"GROUP:Run/Delete:${PROJECT_CODE}-user\"
+      - \"GROUP:Run/Update:${PROJECT_CODE}-user\"
+      - \"GROUP:View/Configure:${PROJECT_CODE}-user\"
+      - \"GROUP:View/Create:${PROJECT_CODE}-user\"
+      - \"GROUP:View/Delete:${PROJECT_CODE}-user\"
+      - \"GROUP:View/Read:${PROJECT_CODE}-user\"
+      - \"GROUP:Overall/Administer:jenkins-admin\"
+      ${YAML_PERMISSION}
+unclassified:
+  location:
+    url: https://jenkins.${JENKINS_URL}/
+    adminAddress: kimkm95@${JENKINS_URL}
+EOF"
+
+##### Step 4.
+echo "[Step 4] Jenkins Docker Build"
+
+# Dockerfile 생성
+su - ${USER_NAME} -c "cd /data/install/jenkins;cat > /data/install/jenkins/Dockerfile <<EOF
+FROM jenkins/jenkins:lts-jdk17
+ENV CASC_JENKINS_CONFIG /usr/share/jenkins
+USER root
+RUN apt-get update -qq && apt-get install -qqy apt-transport-https ca-certificates curl gnupg lsb-release \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
+    && echo \"deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian bullseye stable\" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
+    && apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin \
+    && usermod -aG docker jenkins
+RUN apt-get install -y python3 python3-pip
+# RUN curl -fsSL https://deb.nodesource.com/gpgkey/nodesource.gpg.key | gpg --dearmor | tee \"/usr/share/keyrings/nodesource.gpg\" >/dev/null && echo \"deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_18.x bullseye main\" | tee /etc/apt/sources.list.d/nodesource.list && apt-get update && apt-get install -y nodejs
+USER jenkins
+COPY data/plugins.txt /usr/share/jenkins/plugins.txt
+COPY jenkins.yaml /usr/share/jenkins/jenkins.yaml
+RUN  jenkins-plugin-cli -f /usr/share/jenkins/plugins.txt
+EOF"
+
+su - ${USER_NAME} -c "cat > /data/install/jenkins/data/plugins.txt <<EOF
+git:5.2.0
+matrix-auth:3.2.1
+matrix-project:818.v7eb_e657db_924
+workflow-aggregator:596.v8c21c963d92d
+maven-plugin:3.23
+docker-plugin:1.5
+docker-build-step:2.10
+docker-workflow:572.v950f58993843
+aws-credentials:218.v1b_e9466ec5da_
+github:1.37.3.1
+configuration-as-code:1737.v652ee9b_a_e0d9
+config-file-provider:959.vcff671a_4518b_
+pipeline-maven:1362.vee39a_d4b_02b_1
+role-strategy:689.v731678c3e0eb_
+amazon-ecr:1.114.vfd22430621f5
+pipeline-stage-view:2.34
+codedeploy:1.23
+pipeline-aws:1.43
+s3:466.vf5b_3db_8e3eb_2
+pipeline-utility-steps:2.16.0
+EOF"
+
+su - ${USER_NAME} -c "cat > /data/install/jenkins/docker-compose.yml <<EOF
+version: '3.9'
+services:
+  jenkins:
+    build: .
+    container_name: kkm-jenkins
+    user: jenkins
+    environment:
+      JAVA_OPTS:
+        -Djenkins.install.runSetupWizard=false
+        -Dorg.apache.commons.jelly.tags.fmt.timeZone=Asia/Seoul
+    restart: always
+    ports:
+      - \"80:8080\"
+      - \"50000:50000\"
+    volumes:
+      - \"/data/jenkins_home:/var/jenkins_home\"
+      - \"/var/run/docker.sock:/var/run/docker.sock\"
+EOF"
+echo "3. [jenkins config end] end"
+echo "4. [jenkins docker start] start"
+chmod 666 /var/run/docker.sock
+chmod +x /usr/bin/docker-compose
+su - ${USER_NAME} -c "cd /data/install/jenkins/; docker-compose up -d"
+echo "4. [jenkins docker start] end"
